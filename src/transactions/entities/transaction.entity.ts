@@ -4,10 +4,10 @@ import { Entity, Column, PrimaryColumn, Index, CreateDateColumn } from 'typeorm'
 @Index(['userId', 'timestamp'])
 @Index(['userId'])
 export class Transaction {
-  @PrimaryColumn({ type: 'varchar', length: 64 })
+  @PrimaryColumn({ name: 'transaction_id', type: 'varchar', length: 64 })
   transactionId: string;
 
-  @Column({ type: 'varchar', length: 64 })
+  @Column({ name: 'user_id', type: 'varchar', length: 64 })
   @Index()
   userId: string;
 
@@ -30,10 +30,6 @@ export class Transaction {
   @Column({ type: 'float', nullable: true })
   longitude: number;
 
-  /**
-   * PostGIS geography point — enables spatial queries like
-   * "all fraud within 50km of Lagos"
-   */
   @Column({
     type: 'geography',
     spatialFeatureType: 'Point',
@@ -43,6 +39,6 @@ export class Transaction {
   })
   geoPoint: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }
