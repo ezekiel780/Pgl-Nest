@@ -1,11 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { createReadStream } from 'fs';
 import * as fs from 'fs';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { FraudService, TransactionDto } from '../fraud/fraud.service';
-import { KafkaProducerService } from '../kafka/kafka-producer.service';
 
 export interface IngestionResult {
   processed: number;
@@ -18,17 +17,30 @@ export interface IngestionResult {
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
   private readonly BATCH_SIZE = 500;
+  private kafkaProducer: any = null;
 
   constructor(
     @InjectRepository(Transaction)
     private readonly txnRepo: Repository<Transaction>,
     private readonly fraudService: FraudService,
     private readonly dataSource: DataSource,
-    @Optional() private readonly kafka: KafkaProducerService, // Optional so tests don't break
-  ) {}
+  ) {
+    // Dynamically load Kafka producer only if enabled
+    if (process.env.KAFKA_ENABLED === 'true') {
+      try {
+        const { KafkaProducerService } = require('../kafka/kafka-producer.service');
+        this.kafkaProducer = KafkaProducerService;
+        this.logger.log('Kafka producer connected');
+      } catch {
+        this.logger.warn('Kafka not available — running in direct mode');
+      }
+    } else {
+      this.logger.log('Running in direct mode (no Kafka)');
+    }
+  }
 
   async processJsonFile(filePath: string): Promise<IngestionResult> {
-    const start  = Date.now();
+    const start = Date.now();
     const result: IngestionResult = { processed: 0, flagged: 0, errors: 0, durationMs: 0 };
     this.logger.log(`Ingesting: ${filePath}`);
 
@@ -65,56 +77,55 @@ export class IngestionService {
   }
 
   private async processBatch(
-    batch: TransactionDto[], result: IngestionResult,
+    batch: TransactionDto[],
+    result: IngestionResult,
   ): Promise<void> {
     const entities = batch.map((txn) => {
       const { lat, lng } = this.fraudService.parseLocation(txn.location);
       return {
         transactionId: txn.transactionId,
-        userId: txn.userId, amount: txn.amount,
+        userId: txn.userId,
+        amount: txn.amount,
         timestamp: new Date(txn.timestamp),
-        merchant: txn.merchant, location: txn.location,
-        latitude: lat, longitude: lng,
+        merchant: txn.merchant,
+        location: txn.location,
+        latitude: lat,
+        longitude: lng,
       };
     });
 
     try {
       await this.dataSource
         .createQueryBuilder()
-        .insert().into(Transaction)
-        .values(entities).orIgnore().execute();
+        .insert()
+        .into(Transaction)
+        .values(entities)
+        .orIgnore()
+        .execute();
       result.processed += batch.length;
-
-      // Publish to Kafka for real-time consumer processing
-      if (this.kafka) {
-        await this.kafka.publishBatch(batch).catch((err) =>
-          this.logger.warn(`Kafka publish failed (non-fatal): ${err.message}`),
-        );
-      }
     } catch (err) {
-      this.logger.error(`Bulk insert error: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Bulk insert error: ${message}`);
       result.errors += batch.length;
     }
 
-    // Direct fraud checks (fallback when Kafka consumer hasn't processed yet)
-    if (!this.kafka) {
-      const CONCURRENCY = 20;
-      for (let i = 0; i < batch.length; i += CONCURRENCY) {
-        const checks = await Promise.allSettled(
-          batch.slice(i, i + CONCURRENCY).map((txn) =>
-            this.fraudService.analyseTransaction(txn),
-          ),
-        );
-        checks.forEach((r) => {
-          if (r.status === 'fulfilled' && r.value.isFraud) result.flagged++;
-          if (r.status === 'rejected') result.errors++;
-        });
-      }
+    // Direct fraud checks — always runs (Kafka path would go here if enabled)
+    const CONCURRENCY = 20;
+    for (let i = 0; i < batch.length; i += CONCURRENCY) {
+      const checks = await Promise.allSettled(
+        batch.slice(i, i + CONCURRENCY).map((txn) =>
+          this.fraudService.analyseTransaction(txn),
+        ),
+      );
+      checks.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value.isFraud) result.flagged++;
+        if (r.status === 'rejected') result.errors++;
+      });
     }
   }
 
   async ingestBatch(transactions: TransactionDto[]): Promise<IngestionResult> {
-    const start  = Date.now();
+    const start = Date.now();
     const result: IngestionResult = { processed: 0, flagged: 0, errors: 0, durationMs: 0 };
     for (let i = 0; i < transactions.length; i += this.BATCH_SIZE) {
       await this.processBatch(transactions.slice(i, i + this.BATCH_SIZE), result);
@@ -138,7 +149,8 @@ export class IngestionService {
       const userId = userIds[Math.floor(Math.random() * userIds.length)];
       const txn = {
         transactionId: `txn_${String(i + 1).padStart(8, '0')}`,
-        userId, amount: parseFloat((Math.random() * 5000 + 1).toFixed(2)),
+        userId,
+        amount: parseFloat((Math.random() * 5000 + 1).toFixed(2)),
         timestamp: new Date(Date.now() - Math.random() * 86400000).toISOString(),
         merchant: merchants[Math.floor(Math.random() * merchants.length)],
         location: locations[Math.floor(Math.random() * locations.length)],

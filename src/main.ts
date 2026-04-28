@@ -1,14 +1,21 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
 
   app.enableCors();
-  app.setGlobalPrefix('api/v1');
+  const apiPrefix = configService.getOrThrow<string>('API_PREFIX');
+  const swaggerPath = configService.getOrThrow<string>('SWAGGER_PATH');
+  const appHost = configService.getOrThrow<string>('APP_HOST');
+  const port = Number(configService.getOrThrow<string>('PORT'));
+
+  app.setGlobalPrefix(apiPrefix);
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -28,12 +35,11 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  SwaggerModule.setup(swaggerPath, app, document);
 
-  const port = process.env.PORT || 3000;
   await app.listen(port);
-  logger.log(`🚀 Running on: http://localhost:${port}`);
-  logger.log(`📖 Swagger docs: http://localhost:${port}/docs`);
+  logger.log(`🚀 Running on: http://${appHost}:${port}/${apiPrefix}`);
+  logger.log(`📖 Swagger docs: http://${appHost}:${port}/${swaggerPath}`);
 }
 
 bootstrap();
