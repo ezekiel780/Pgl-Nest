@@ -301,9 +301,9 @@ curl "http://localhost:3000/api/v1/fraud/check?userId=user_0001"
 | `PORT` | `3000` | API port |
 | `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_USERNAME` | `fraud_user` | DB user |
-| `DB_PASSWORD` | `fraud_pass` | DB password |
-| `DB_NAME` | `fraud_db` | Database |
+| `DB_USERNAME` | `------` | DB user |
+| `DB_PASSWORD` | `------` | DB password |
+| `DB_NAME` | `------` | Database |
 | `DB_SYNCHRONIZE` | `true` | Auto-migrate (disable in prod) |
 | `REDIS_HOST` | `localhost` | Redis host |
 | `REDIS_PORT` | `6379` | Redis port |
