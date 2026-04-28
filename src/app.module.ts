@@ -38,7 +38,7 @@ const getKafkaModule = () => {
         const databaseUrl = cfg.get<string>('DATABASE_URL');
 
         return {
-          type: 'postgres',
+          type: cfg.getOrThrow<'postgres'>('DB_TYPE') as 'postgres',
           ...(databaseUrl
             ? { url: databaseUrl }
             : {
