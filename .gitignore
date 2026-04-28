@@ -1,0 +1,43 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+coverage/
+.nestjs-cli.json
+tmp/
+temp/
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+
+*.tsbuildinfo
+
+# test output
+/reports/
+/test-results/
+
+# local databases / caches
+*.sqlite
+*.sqlite3
+*.db
+.cache/
+
+# runtime / process files
+*.pid
+*.seed
+*.pid.lock
+
+# docker overrides
+docker-compose.override.yml
