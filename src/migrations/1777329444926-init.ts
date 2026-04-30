@@ -57,7 +57,6 @@ export class Init1777329444926 implements MigrationInterface {
             )
         `);
 
-        // FLAGGED INDEXES (NO DUPLICATES)
         await queryRunner.query(`CREATE INDEX "IDX_flagged_transactionId" ON "flagged_transactions" ("transactionId")`);
         await queryRunner.query(`CREATE INDEX "IDX_flagged_userId" ON "flagged_transactions" ("userId")`);
         await queryRunner.query(`CREATE INDEX "IDX_flagged_reason" ON "flagged_transactions" ("reason")`);

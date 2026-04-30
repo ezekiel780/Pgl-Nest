@@ -9,7 +9,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
-  app.enableCors();
+  app.enableCors({
+  origin: configService.getOrThrow<string>('FRONTEND_URL'),
+  credentials: true,
+  });
   const apiPrefix = configService.getOrThrow<string>('API_PREFIX');
   const swaggerPath = configService.getOrThrow<string>('SWAGGER_PATH');
   const appHost = configService.getOrThrow<string>('APP_HOST');
