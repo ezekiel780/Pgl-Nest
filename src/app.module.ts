@@ -8,8 +8,12 @@ import { IngestionModule } from './ingestion/ingestion.module';
 import { RedisModule } from './common/redis/redis.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { QueueModule } from './queue/queue.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { OtpModule } from './otp/otp.module';
 import { Transaction } from './transactions/entities/transaction.entity';
 import { FlaggedTransaction } from './fraud/entities/flagged-transaction.entity';
+import { User } from './users/entities/user.entity';
 
 const toBoolean = (value: string): boolean => value === 'true';
 
@@ -50,7 +54,7 @@ const getKafkaModule = () => {
                 password: cfg.getOrThrow<string>('DB_PASS'),
                 database: cfg.getOrThrow<string>('DB_NAME'),
               }),
-          entities: [Transaction, FlaggedTransaction],
+          entities: [Transaction, FlaggedTransaction, User],  // ← User added
           synchronize: toBoolean(cfg.getOrThrow<string>('DB_SYNCHRONIZE')),
           logging: toBoolean(cfg.getOrThrow<string>('DB_LOGGING')),
           ssl: toBoolean(cfg.get<string>('DB_SSL_ENABLED', 'false'))
@@ -68,6 +72,9 @@ const getKafkaModule = () => {
     RedisModule,
     GatewayModule,
     QueueModule,
+    AuthModule,        
+    OtpModule,
+    UsersModule,        
     TransactionsModule,
     FraudModule,
     IngestionModule,

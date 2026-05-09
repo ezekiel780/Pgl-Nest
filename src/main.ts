@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -9,8 +10,16 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
+  app.use(cookieParser());
+
   app.enableCors({
-    origin: configService.get<string>('FRONTEND_URL', 'http://localhost:5173'),
+    origin: configService
+      .getOrThrow<string>('FRONTEND_URL')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
     credentials: true,
   });
 
@@ -31,8 +40,10 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Fraud Detection API')
-    .setDescription('High-volume transaction fraud detection system.')
+    .setDescription('High-volume transaction fraud detection system with JWT auth.')
     .setVersion('1.0')
+    .addCookieAuth('access_token')
+    .addTag('auth')
     .addTag('fraud')
     .addTag('ingestion')
     .addTag('transactions')

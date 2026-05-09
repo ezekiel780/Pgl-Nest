@@ -89,4 +89,24 @@ export class RedisService {
       await this.redis.set(key, value);
     }
   }
+
+  async del(...keys: string[]): Promise<number> {
+    if (keys.length === 0) return 0;
+    return this.redis.del(...keys);
+  }
+
+  async incrementWithTtl(key: string, ttlSec: number): Promise<number> {
+    const pipeline = this.redis.pipeline();
+    pipeline.incr(key);
+    pipeline.ttl(key);
+    const results = await pipeline.exec();
+    const count = results[0][1] as number;
+    const ttl = results[1][1] as number;
+
+    if (ttl < 0) {
+      await this.redis.expire(key, ttlSec);
+    }
+
+    return count;
+  }
 }
