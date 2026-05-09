@@ -8,6 +8,7 @@ coverage/
 .nestjs-cli.json
 tmp/
 temp/
+sample.json
 
 *.log
 npm-debug.log*

@@ -8,25 +8,31 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { IngestionService, IngestionResult } from './ingestion.service';
-
 import { IsArray, ValidateNested, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
-import { TransactionDto } from '../fraud/fraud.service'; // keep for now, but better move to dto file later
+import { TransactionDto } from '../fraud/fraud.service';
 
-// ✅ FIXED DTO
 class BatchDto {
   @IsArray()
   @ArrayMaxSize(10000)
   @ValidateNested({ each: true })
-  @Type(() => TransactionDto) // 🔥 FIX: was Object, now correct class
+  @Type(() => TransactionDto)
   transactions: TransactionDto[];
 }
 
 @ApiTags('ingestion')
 @Controller('ingestion')
 export class IngestionController {
-  constructor(private readonly svc: IngestionService) {}
+  private readonly dataDir: string;
+
+  constructor(
+    private readonly svc: IngestionService,
+    private readonly config: ConfigService,
+  ) {
+    this.dataDir = this.config.get('INGESTION_DATA_DIR', './data');
+  }
 
   @Post('batch')
   @HttpCode(HttpStatus.OK)
@@ -45,8 +51,7 @@ export class IngestionController {
     if (!filePath || filePath.includes('..')) {
       throw new BadRequestException('Invalid file path');
     }
-
-    return this.svc.processJsonFile(`/app/data/${filePath}`);
+    return this.svc.processJsonFile(`${this.dataDir}/${filePath}`);
   }
 
   @Post('generate-sample')
@@ -58,7 +63,7 @@ export class IngestionController {
     @Query('count') count = 10000,
     @Query('filename') filename = 'sample.json',
   ): Promise<{ message: string }> {
-    await this.svc.generateSampleData(+count, `/app/data/${filename}`);
-    return { message: `Generated ${count} transactions at /data/${filename}` };
+    await this.svc.generateSampleData(+count, `${this.dataDir}/${filename}`);
+    return { message: `Generated ${count} transactions at ${this.dataDir}/${filename}` };
   }
 }

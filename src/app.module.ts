@@ -6,6 +6,8 @@ import { FraudModule } from './fraud/fraud.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { RedisModule } from './common/redis/redis.module';
+import { GatewayModule } from './gateway/gateway.module';
+import { QueueModule } from './queue/queue.module';
 import { Transaction } from './transactions/entities/transaction.entity';
 import { FlaggedTransaction } from './fraud/entities/flagged-transaction.entity';
 
@@ -51,10 +53,10 @@ const getKafkaModule = () => {
           entities: [Transaction, FlaggedTransaction],
           synchronize: toBoolean(cfg.getOrThrow<string>('DB_SYNCHRONIZE')),
           logging: toBoolean(cfg.getOrThrow<string>('DB_LOGGING')),
-          ssl: toBoolean(cfg.getOrThrow<string>('DB_SSL_ENABLED'))
+          ssl: toBoolean(cfg.get<string>('DB_SSL_ENABLED', 'false'))
             ? {
                 rejectUnauthorized: toBoolean(
-                  cfg.getOrThrow<string>('DB_SSL_REJECT_UNAUTHORIZED'),
+                  cfg.get<string>('DB_SSL_REJECT_UNAUTHORIZED', 'true'),
                 ),
               }
             : false,
@@ -64,6 +66,8 @@ const getKafkaModule = () => {
     }),
 
     RedisModule,
+    GatewayModule,
+    QueueModule,
     TransactionsModule,
     FraudModule,
     IngestionModule,

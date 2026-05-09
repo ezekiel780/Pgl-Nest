@@ -15,18 +15,23 @@ const toNumber = (value: string | undefined, fallback: number): number => {
       inject: [ConfigService],
       useFactory: async (cfg: ConfigService) => {
         const Redis = await import('ioredis');
+        const options = {
+          retryStrategy: (times: number) =>
+            Math.min(
+              times * toNumber(cfg.get<string>('REDIS_RETRY_MULTIPLIER'), 50),
+              toNumber(cfg.get<string>('REDIS_RETRY_MAX_DELAY'), 2000),
+            ),
+          lazyConnect: true,
+        };
+        const redisUrl = cfg.get<string>('REDIS_URL');
 
-        const client = new Redis.default(
-          cfg.getOrThrow<string>('REDIS_URL'),
-          {
-            retryStrategy: (times) =>
-              Math.min(
-                times * toNumber(cfg.get<string>('REDIS_RETRY_MULTIPLIER'), 50),
-                toNumber(cfg.get<string>('REDIS_RETRY_MAX_DELAY'), 2000),
-              ),
-            lazyConnect: true,
-          },
-        );
+        const client = redisUrl
+          ? new Redis.default(redisUrl, options)
+          : new Redis.default({
+              ...options,
+              host: cfg.get<string>('REDIS_HOST', 'localhost'),
+              port: toNumber(cfg.get<string>('REDIS_PORT'), 6379),
+            });
 
         await client.connect();
         return client;

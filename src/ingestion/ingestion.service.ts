@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { createReadStream } from 'fs';
 import * as fs from 'fs';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { FraudService, TransactionDto } from '../fraud/fraud.service';
+import { QueueProducerService } from '../queue/queue-producer.service';
 
 export interface IngestionResult {
   processed: number;
@@ -17,42 +18,38 @@ export interface IngestionResult {
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
   private readonly BATCH_SIZE = 500;
-  private kafkaProducer: any = null;
 
   constructor(
     @InjectRepository(Transaction)
     private readonly txnRepo: Repository<Transaction>,
     private readonly fraudService: FraudService,
     private readonly dataSource: DataSource,
+    @Optional() private readonly queue: QueueProducerService,
   ) {
-    // Dynamically load Kafka producer only if enabled
-    if (process.env.KAFKA_ENABLED === 'true') {
-      try {
-        const { KafkaProducerService } = require('../kafka/kafka-producer.service');
-        this.kafkaProducer = KafkaProducerService;
-        this.logger.log('Kafka producer connected');
-      } catch {
-        this.logger.warn('Kafka not available — running in direct mode');
-      }
+    if (this.queue) {
+      this.logger.log('Ingestion mode: BullMQ queue');
     } else {
-      this.logger.log('Running in direct mode (no Kafka)');
+      this.logger.log('Ingestion mode: direct fraud checks');
     }
   }
 
   async processJsonFile(filePath: string): Promise<IngestionResult> {
     const start = Date.now();
-    const result: IngestionResult = { processed: 0, flagged: 0, errors: 0, durationMs: 0 };
+    const result: IngestionResult = {
+      processed: 0,
+      flagged: 0,
+      errors: 0,
+      durationMs: 0,
+    };
     this.logger.log(`Ingesting: ${filePath}`);
 
     return new Promise(async (resolve, reject) => {
       let batch: TransactionDto[] = [];
 
-      const { parser }      = await import('stream-json');
+      const { parser } = await import('stream-json');
       const { streamArray } = await import('stream-json/streamers/StreamArray');
 
-      const pipeline = createReadStream(filePath)
-        .pipe(parser())
-        .pipe(streamArray());
+      const pipeline = createReadStream(filePath).pipe(parser()).pipe(streamArray());
 
       pipeline.on('data', async ({ value }) => {
         batch.push(value);
@@ -68,7 +65,9 @@ export class IngestionService {
       pipeline.on('end', async () => {
         if (batch.length > 0) await this.processBatch(batch, result);
         result.durationMs = Date.now() - start;
-        this.logger.log(`Done: ${result.processed} processed, ${result.flagged} flagged in ${result.durationMs}ms`);
+        this.logger.log(
+          `Done: ${result.processed} processed, ${result.flagged} flagged in ${result.durationMs}ms`,
+        );
         resolve(result);
       });
 
@@ -107,15 +106,32 @@ export class IngestionService {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Bulk insert error: ${message}`);
       result.errors += batch.length;
+      return;
     }
 
-    // Direct fraud checks — always runs (Kafka path would go here if enabled)
+    if (this.queue) {
+      try {
+        await this.queue.publishBatch(batch);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`BullMQ publish failed (non-fatal): ${message}`);
+        await this.runDirectChecks(batch, result);
+      }
+    } else {
+      await this.runDirectChecks(batch, result);
+    }
+  }
+
+  private async runDirectChecks(
+    batch: TransactionDto[],
+    result: IngestionResult,
+  ): Promise<void> {
     const CONCURRENCY = 20;
     for (let i = 0; i < batch.length; i += CONCURRENCY) {
       const checks = await Promise.allSettled(
-        batch.slice(i, i + CONCURRENCY).map((txn) =>
-          this.fraudService.analyseTransaction(txn),
-        ),
+        batch
+          .slice(i, i + CONCURRENCY)
+          .map((txn) => this.fraudService.analyseTransaction(txn)),
       );
       checks.forEach((r) => {
         if (r.status === 'fulfilled' && r.value.isFraud) result.flagged++;
@@ -126,7 +142,12 @@ export class IngestionService {
 
   async ingestBatch(transactions: TransactionDto[]): Promise<IngestionResult> {
     const start = Date.now();
-    const result: IngestionResult = { processed: 0, flagged: 0, errors: 0, durationMs: 0 };
+    const result: IngestionResult = {
+      processed: 0,
+      flagged: 0,
+      errors: 0,
+      durationMs: 0,
+    };
     for (let i = 0; i < transactions.length; i += this.BATCH_SIZE) {
       await this.processBatch(transactions.slice(i, i + this.BATCH_SIZE), result);
     }
@@ -137,8 +158,11 @@ export class IngestionService {
   async generateSampleData(count: number, outputPath: string): Promise<void> {
     const merchants = ['Amazon', 'Walmart', 'Shell', 'Apple Store', 'Starbucks'];
     const locations = [
-      '40.7128,-74.0060', '34.0522,-118.2437',
-      '6.5244,3.3792', '51.5074,-0.1278', '48.8566,2.3522',
+      '40.7128,-74.0060',
+      '34.0522,-118.2437',
+      '6.5244,3.3792',
+      '51.5074,-0.1278',
+      '48.8566,2.3522',
     ];
     const userIds = Array.from({ length: 100 }, (_, i) =>
       `user_${String(i + 1).padStart(4, '0')}`,
@@ -160,5 +184,6 @@ export class IngestionService {
     }
     stream.write('\n]');
     await new Promise((r) => stream.end(r));
+    this.logger.log(`Generated ${count} transactions -> ${outputPath}`);
   }
 }

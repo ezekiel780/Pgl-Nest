@@ -10,9 +10,10 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
 
   app.enableCors({
-  origin: configService.getOrThrow<string>('FRONTEND_URL'),
-  credentials: true,
+    origin: configService.get<string>('FRONTEND_URL', 'http://localhost:5173'),
+    credentials: true,
   });
+
   const apiPrefix = configService.getOrThrow<string>('API_PREFIX');
   const swaggerPath = configService.getOrThrow<string>('SWAGGER_PATH');
   const appHost = configService.getOrThrow<string>('APP_HOST');
@@ -41,8 +42,8 @@ async function bootstrap() {
   SwaggerModule.setup(swaggerPath, app, document);
 
   await app.listen(port);
-  logger.log(`🚀 Running on: http://${appHost}:${port}/${apiPrefix}`);
-  logger.log(`📖 Swagger docs: http://${appHost}:${port}/${swaggerPath}`);
+  logger.log(`Running on: http://${appHost}:${port}/${apiPrefix}`);
+  logger.log(`Swagger docs: http://${appHost}:${port}/${swaggerPath}`);
 }
 
 bootstrap();

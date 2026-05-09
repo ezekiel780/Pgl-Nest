@@ -10,19 +10,17 @@ export enum FraudReason {
 }
 
 @Entity('flagged_transactions')
-@Index(['userId'])
-@Index(['transactionId'])
-@Index(['reason'])
+@Index('IDX_flagged_userId', ['userId'])
+@Index('IDX_flagged_transactionId', ['transactionId'])
+@Index('IDX_flagged_reason', ['reason'])
 export class FlaggedTransaction {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column({ type: 'varchar', length: 64 })
-  @Index()
   transactionId: string;
 
   @Column({ type: 'varchar', length: 64 })
-  @Index()
   userId: string;
 
   @Column({ type: 'decimal', precision: 15, scale: 2 })

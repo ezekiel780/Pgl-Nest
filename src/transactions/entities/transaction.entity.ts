@@ -1,21 +1,20 @@
 import { Entity, Column, PrimaryColumn, Index, CreateDateColumn } from 'typeorm';
 
 @Entity('transactions')
-@Index(['userId', 'timestamp'])
-@Index(['userId'])
+@Index('IDX_transactions_user_timestamp', ['userId', 'timestamp'])
+@Index('IDX_transactions_userId', ['userId'])
+@Index('IDX_transactions_timestamp', ['timestamp'])
 export class Transaction {
-  @PrimaryColumn({ name: 'transaction_id', type: 'varchar', length: 64 })
+  @PrimaryColumn({ type: 'varchar', length: 64 })
   transactionId: string;
 
-  @Column({ name: 'user_id', type: 'varchar', length: 64 })
-  @Index()
+  @Column({ type: 'varchar', length: 64 })
   userId: string;
 
   @Column({ type: 'decimal', precision: 15, scale: 2 })
   amount: number;
 
   @Column({ type: 'timestamptz' })
-  @Index()
   timestamp: Date;
 
   @Column({ type: 'varchar', length: 255 })
@@ -39,6 +38,6 @@ export class Transaction {
   })
   geoPoint: string;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn()
   createdAt: Date;
 }

@@ -1,33 +1,26 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNumber, IsString } from 'class-validator';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { getDistance } from 'geolib';
 import { format } from 'date-fns';
-import { FlaggedTransaction, FraudReason } from './entities/flagged-transaction.entity';
-import { AnalyseFraudDto } from './dto/analyse-fraud.dto';
+import {
+  FlaggedTransaction,
+  FraudReason,
+} from './entities/flagged-transaction.entity';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { RedisService } from '../common/redis/redis.service';
+import { FraudGateway } from '../gateway/fraud.gateway';
 
 export class TransactionDto {
-  @IsString()
   transactionId: string;
-
-  @IsString()
   userId: string;
-
-  @IsNumber()
   amount: number;
-
-  @IsString()
   timestamp: string | Date;
-
-  @IsString()
   merchant: string;
-
-  @IsString()
   location: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface FraudCheckResult {
@@ -50,84 +43,70 @@ export class FraudService {
     @InjectRepository(Transaction)
     private readonly txnRepo: Repository<Transaction>,
     private readonly redis: RedisService,
+    private readonly dataSource: DataSource,
     private readonly config: ConfigService,
+    @Optional() private readonly fraudGateway: FraudGateway,
   ) {
     this.MAX_TXN_PER_MINUTE = +this.config.get('FRAUD_MAX_TXN_PER_MINUTE', 5);
-    this.MAX_DAILY_AMOUNT   = +this.config.get('FRAUD_MAX_DAILY_AMOUNT', 10000);
-    this.GEO_WINDOW_MS      = +this.config.get('FRAUD_LOCATION_WINDOW_MINUTES', 2) * 60 * 1000;
+    this.MAX_DAILY_AMOUNT = +this.config.get('FRAUD_MAX_DAILY_AMOUNT', 10000);
+    this.GEO_WINDOW_MS =
+      +this.config.get('FRAUD_LOCATION_WINDOW_MINUTES', 2) * 60 * 1000;
   }
 
-  async analyse(dto: AnalyseFraudDto) {
-    const reasons: string[] = [];
-    let riskScore = 0;
-
-    // BASIC RULES (real logic, no hardcoding response)
-
-    // 1. High amount rule
-    if (dto.amount >= 1000) {
-      reasons.push('HIGH_AMOUNT');
-      riskScore += 40;
-    }
-
-    // 2. Geo missing check
-    if (!dto.latitude || !dto.longitude) {
-      reasons.push('MISSING_GEO');
-      riskScore += 20;
-    }
-
-    // 3. Time sanity check (future timestamp)
-    const txTime = new Date(dto.timestamp).getTime();
-    const now = Date.now();
-
-    if (txTime > now) {
-      reasons.push('FUTURE_TRANSACTION');
-      riskScore += 30;
-    }
-
-    return {
-      isFraud: riskScore >= 70,
-      reasons,
-      riskScore,
-      metadata: {
-        evaluatedAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  /** Main entry point — runs all 3 rules in parallel. */
   async analyseTransaction(txn: TransactionDto): Promise<FraudCheckResult> {
-    const ts    = new Date(txn.timestamp);
+    const ts = new Date(txn.timestamp);
     const nowMs = ts.getTime();
     const dateKey = format(ts, 'yyyy-MM-dd');
     const { lat, lng } = this.parseLocation(txn.location);
 
     const result: FraudCheckResult = {
-      isFraud: false, reasons: [], riskScore: 0, metadata: {},
+      isFraud: false,
+      reasons: [],
+      riskScore: 0,
+      metadata: {},
     };
 
-    // All three checks run at the same time
     await Promise.all([
       this.checkVelocity(txn, nowMs, result),
       this.checkDailyLimit(txn, dateKey, result),
       this.checkGeoVelocity(txn, lat, lng, nowMs, result),
     ]);
 
-    // Update Redis AFTER checks so this txn counts in the NEXT request
     await this.updateState(txn, lat, lng, nowMs, dateKey);
 
     if (result.isFraud) {
       await this.persist(txn, ts, lat, lng, result);
+
+      // Emit WebSocket event to all connected frontend clients
+      if (this.fraudGateway) {
+        this.fraudGateway.emitFraudAlert({
+          transactionId: txn.transactionId,
+          userId: txn.userId,
+          amount: txn.amount,
+          merchant: txn.merchant,
+          location: txn.location,
+          reasons: result.reasons,
+          riskScore: result.riskScore,
+          metadata: result.metadata,
+          timestamp: ts.toISOString(),
+        });
+      }
     }
 
     return result;
   }
 
-  // ── Rule 1: Velocity ─────────────────────────────────────────────────────
   private async checkVelocity(
-    txn: TransactionDto, nowMs: number, result: FraudCheckResult,
+    txn: TransactionDto,
+    nowMs: number,
+    result: FraudCheckResult,
   ): Promise<void> {
     const count = await this.redis.slidingWindowCount(
-      `vel:${txn.userId}`, txn.transactionId, nowMs, 60_000, 300,
+      `vel:${txn.userId}`,
+      txn.transactionId,
+      nowMs,
+      60_000,
+      300,
     );
     if (count > this.MAX_TXN_PER_MINUTE) {
       result.isFraud = true;
@@ -138,11 +117,12 @@ export class FraudService {
     }
   }
 
-  // ── Rule 2: Daily limit ──────────────────────────────────────────────────
   private async checkDailyLimit(
-    txn: TransactionDto, dateKey: string, result: FraudCheckResult,
+    txn: TransactionDto,
+    dateKey: string,
+    result: FraudCheckResult,
   ): Promise<void> {
-    const current  = await this.redis.getDailyTotal(txn.userId, dateKey);
+    const current = await this.redis.getDailyTotal(txn.userId, dateKey);
     const newTotal = current + Number(txn.amount);
     if (newTotal > this.MAX_DAILY_AMOUNT) {
       result.isFraud = true;
@@ -154,7 +134,6 @@ export class FraudService {
     }
   }
 
-  // ── Rule 3: Geo-velocity ─────────────────────────────────────────────────
   private async checkGeoVelocity(
     txn: TransactionDto,
     lat: number | null,
@@ -165,7 +144,7 @@ export class FraudService {
     if (lat === null || lng === null) return;
     const last = await this.redis.getLastLocation(txn.userId);
     if (!last) return;
-    if (nowMs - last.ts > this.GEO_WINDOW_MS) return; // outside window
+    if (nowMs - last.ts > this.GEO_WINDOW_MS) return;
 
     const distanceMeters = getDistance(
       { latitude: last.lat, longitude: last.lng },
@@ -175,18 +154,22 @@ export class FraudService {
     if (distanceMeters > 1000) {
       result.isFraud = true;
       result.reasons.push(FraudReason.GEO_VELOCITY);
-      result.metadata.distanceKm      = (distanceMeters / 1000).toFixed(2);
+      result.metadata.distanceKm = (distanceMeters / 1000).toFixed(2);
       result.metadata.timeDiffSeconds = ((nowMs - last.ts) / 1000).toFixed(1);
-      result.metadata.prevLocation    = `${last.lat},${last.lng}`;
+      result.metadata.prevLocation = `${last.lat},${last.lng}`;
       result.riskScore = Math.max(result.riskScore, 0.95);
-      this.logger.warn(`GEO_VELOCITY user=${txn.userId} dist=${distanceMeters}m`);
+      this.logger.warn(
+        `GEO_VELOCITY user=${txn.userId} dist=${distanceMeters}m`,
+      );
     }
   }
 
-  // ── Update Redis state ───────────────────────────────────────────────────
   private async updateState(
-    txn: TransactionDto, lat: number | null,
-    lng: number | null, nowMs: number, dateKey: string,
+    txn: TransactionDto,
+    lat: number | null,
+    lng: number | null,
+    nowMs: number,
+    dateKey: string,
   ): Promise<void> {
     const tasks: Promise<any>[] = [
       this.redis.incrementDailyTotal(txn.userId, dateKey, Number(txn.amount)),
@@ -197,31 +180,31 @@ export class FraudService {
     await Promise.all(tasks);
   }
 
-  // ── Persist flags ────────────────────────────────────────────────────────
   private async persist(
-    txn: TransactionDto, ts: Date,
-    lat: number | null, lng: number | null,
+    txn: TransactionDto,
+    ts: Date,
+    lat: number | null,
+    lng: number | null,
     result: FraudCheckResult,
   ): Promise<void> {
     const entities = result.reasons.map((reason) =>
       this.flaggedRepo.create({
         transactionId: txn.transactionId,
-        userId:        txn.userId,
-        amount:        txn.amount,
-        timestamp:     ts,
-        merchant:      txn.merchant,
-        location:      txn.location,
-        latitude:      lat,
-        longitude:     lng,
+        userId: txn.userId,
+        amount: txn.amount,
+        timestamp: ts,
+        merchant: txn.merchant,
+        location: txn.location,
+        latitude: lat,
+        longitude: lng,
         reason,
-        metadata:      result.metadata,
-        riskScore:     result.riskScore,
+        metadata: result.metadata,
+        riskScore: result.riskScore,
       }),
     );
     await this.flaggedRepo.save(entities, { chunk: 100 });
   }
 
-  // ── API helpers ──────────────────────────────────────────────────────────
   async getFlaggedByUser(userId: string, page = 1, limit = 50) {
     const [data, total] = await this.flaggedRepo.findAndCount({
       where: { userId },
@@ -229,10 +212,7 @@ export class FraudService {
       skip: (page - 1) * limit,
       take: limit,
     });
-    return {
-      data, total, page,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data, total, page, totalPages: Math.ceil(total / limit) };
   }
 
   async getAllFlagged(page = 1, limit = 100, reason?: FraudReason) {
@@ -263,9 +243,9 @@ export class FraudService {
       .then((rows) =>
         rows.map((r) => ({
           userId: r.userId,
-          lat:    parseFloat(r.lat),
-          lng:    parseFloat(r.lng),
-          count:  parseInt(r.count, 10),
+          lat: parseFloat(r.lat),
+          lng: parseFloat(r.lng),
+          count: parseInt(r.count, 10),
         })),
       );
   }
@@ -290,7 +270,10 @@ export class FraudService {
     return { total, byReason, topUsers };
   }
 
-  // ── Utility ──────────────────────────────────────────────────────────────
+  async analyse(dto: TransactionDto): Promise<FraudCheckResult> {
+    return this.analyseTransaction(dto);
+  }
+
   parseLocation(location: string): { lat: number | null; lng: number | null } {
     if (!location) return { lat: null, lng: null };
     const parts = location.split(',').map((s) => parseFloat(s.trim()));
