@@ -4,7 +4,7 @@ Real-time, high-volume transaction fraud detection built with **NestJS**, **Bull
 
 **Live API →** https://pgl-nest.onrender.com  
 **Swagger UI →** https://pgl-nest.onrender.com/docs  
-**Frontend →** https://distributed-system.netlify.app
+**Frontend →** 
 
 ---
 
@@ -497,8 +497,8 @@ In production, a managed service like **Confluent Cloud** or **AWS MSK** would r
 
 | Item | Link |
 |------|------|
-| Frontend (Netlify) | https://distributed-system.netlify.app |
-| Backend API (Render) | https://pgl-nest.onrender.com |
-| Swagger UI | https://pgl-nest.onrender.com/docs |
+| Frontend (Netlify) |  |
+| Backend API (Render) |  |
+| Swagger UI |  |
 | Backend GitHub | https://github.com/ezekiel780/Pgl-Nest |
 | Frontend GitHub | https://github.com/ezekiel780/detection-frontend |
