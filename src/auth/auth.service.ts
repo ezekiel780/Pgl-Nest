@@ -11,7 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
-import { randomBytes, randomInt } from 'crypto'; 
+import { randomBytes, randomInt } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
@@ -103,7 +103,6 @@ export class AuthService {
 
   async forgotPassword(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
-    // Silently return if user not found — prevents email enumeration
     if (!user || !user.isActive) return;
     await this.generateAndSendOtp(user, OtpType.RESET);
   }
@@ -130,7 +129,6 @@ export class AuthService {
     const hashed = await bcrypt.hash(newPassword, 12);
     await this.usersService.updatePassword(userId, hashed);
     await this.redis.del(`reset:token:${resetToken}`);
-
     await this.usersService.updateRefreshToken(userId, null);
   }
 
@@ -149,20 +147,20 @@ export class AuthService {
 
     await this.usersService.updateRefreshToken(user.id, refreshToken);
 
-    const isProd = this.config.get('NODE_ENV') === 'production';
     const refreshPath = `/${this.config.getOrThrow<string>('API_PREFIX')}/auth/refresh`;
 
+    // ✅ FIXED: sameSite none + secure true for cross-origin cookie support
     res.cookie('access_token', accessToken, {
       httpOnly: true,
-      secure:   isProd,
-      sameSite: 'strict',
+      secure:   true,
+      sameSite: 'none',
       maxAge:   15 * 60 * 1000,
     });
 
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
-      secure:   isProd,
-      sameSite: 'strict',
+      secure:   true,
+      sameSite: 'none',
       maxAge:   7 * 24 * 60 * 60 * 1000,
       path:     refreshPath,
     });
@@ -172,21 +170,21 @@ export class AuthService {
     await this.issueTokenCookies(user, res);
   }
 
+  // ✅ FIXED: sameSite none + secure true for cross-origin cookie support
   async logout(userId: string, res: Response): Promise<void> {
     await this.usersService.updateRefreshToken(userId, null);
-    const isProd = this.config.get('NODE_ENV') === 'production';
     const refreshPath = `/${this.config.getOrThrow<string>('API_PREFIX')}/auth/refresh`;
 
     res.clearCookie('access_token', {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
+      secure:   true,
+      sameSite: 'none',
     });
     res.clearCookie('refresh_token', {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'strict',
-      path: refreshPath,
+      secure:   true,
+      sameSite: 'none',
+      path:     refreshPath,
     });
   }
 
@@ -267,7 +265,7 @@ export class AuthService {
       type === OtpType.VERIFY
         ? 'verify your FraudGuard account'
         : type === OtpType.RESET
-          ? 'reset your FraudGuard password' 
+          ? 'reset your FraudGuard password'
           : 'complete your FraudGuard login';
 
     await this.resend.emails.send({
