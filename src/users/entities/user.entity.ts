@@ -8,9 +8,9 @@ import {
 } from 'typeorm';
 
 export enum UserRole {
-  ADMIN   = 'admin',  
-  ANALYST = 'analyst', 
-  VIEWER  = 'viewer',   
+  ADMIN   = 'admin',
+  ANALYST = 'analyst',
+  VIEWER  = 'viewer',
 }
 
 @Entity('users')
@@ -18,24 +18,28 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ type: 'varchar', length: 100 })
+  name: string;
+
   @Column({ type: 'varchar', length: 100, unique: true })
   @Index()
   email: string;
 
-  @Column({ type: 'varchar', length: 100 })
-  name: string;
-
   @Column({ type: 'varchar' })
-  password: string; 
+  password: string;
 
-  @Column({ type: 'enum', enum: UserRole, default: UserRole.VIEWER })
+  @Column({
+    type: 'enum',
+    enum: UserRole,
+    default: UserRole.VIEWER,
+  })
   role: UserRole;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
   @Column({ type: 'varchar', nullable: true })
-  refreshToken: string | null;
+  refreshToken: string;
 
   @CreateDateColumn()
   createdAt: Date;

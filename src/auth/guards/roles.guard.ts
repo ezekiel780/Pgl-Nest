@@ -5,30 +5,32 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { UserRole } from '../../users/entities/user.entity';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { UserRole } from '../../users/entities/user.entity';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    // Get roles required for this route
     const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
     );
 
+    // No roles required — allow access
     if (!requiredRoles || requiredRoles.length === 0) return true;
 
     const { user } = context.switchToHttp().getRequest();
 
-    if (!user) throw new ForbiddenException('User not authenticated');
+    // No user on request — deny
+    if (!user) throw new ForbiddenException('Access denied');
 
-    const hasRole = requiredRoles.includes(user.role);
-
-    if (!hasRole) {
+    // Check user has required role
+    if (!requiredRoles.includes(user.role)) {
       throw new ForbiddenException(
-        `Access denied. Required role: ${requiredRoles.join(' or ')}`,
+        `This action requires one of these roles: ${requiredRoles.join(', ')}`,
       );
     }
 
