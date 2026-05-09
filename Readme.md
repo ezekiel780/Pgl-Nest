@@ -2,8 +2,8 @@
 
 Real-time, high-volume transaction fraud detection built with **NestJS**, **BullMQ**, **WebSocket**, **Apache Kafka**, **Redis**, and **PostgreSQL (Supabase) + PostGIS**.
 
-**Live API →** https://pgl-nest.onrender.com  
-**Swagger UI →** https://pgl-nest.onrender.com/docs  
+**Live API →** https://----------.com  
+**Swagger UI →** https://pgl------.com/docs  
 **Frontend →** 
 
 ---
