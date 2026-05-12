@@ -77,19 +77,16 @@ export class UsersService {
     return this.repo.count();
   }
 
-  // ✅ NEW
   async activate(userId: string): Promise<void> {
     const user = await this.findById(userId);
     await this.repo.update(user.id, { isActive: true });
   }
 
-  // ✅ NEW
   async updatePassword(userId: string, hashedPassword: string): Promise<void> {
     const user = await this.findById(userId);
     await this.repo.update(user.id, { password: hashedPassword });
   }
 
-  // ✅ NEW
   async updateRefreshToken(
     userId: string,
     refreshToken: string | null,
@@ -100,7 +97,6 @@ export class UsersService {
     await this.repo.update(userId, { refreshToken: hashed });
   }
 
-  // ✅ NEW
   async validateRefreshToken(
     userId: string,
     refreshToken: string,
@@ -108,5 +104,28 @@ export class UsersService {
     const user = await this.findById(userId);
     if (!user || !user.refreshToken) return false;
     return bcrypt.compare(refreshToken, user.refreshToken);
+  }
+
+  async updateName(
+    id: string,
+    name: string,
+  ): Promise<Omit<User, 'password' | 'refreshToken'>> {
+    const user = await this.findById(id);
+    user.name  = name;
+    await this.repo.save(user);
+    const { password, refreshToken, ...safe } = user;
+    return safe;
+  }
+
+  async changePassword(
+    id: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user    = await this.findById(id);
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) throw new ForbiddenException('Current password is incorrect');
+    user.password = await bcrypt.hash(newPassword, 12);
+    await this.repo.save(user);
   }
 }

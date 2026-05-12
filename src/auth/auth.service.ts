@@ -18,6 +18,8 @@ import { RegisterDto } from './dto/register.dto';
 import { OtpType } from '../otp/dto/otp.dto';
 import { Resend } from 'resend';
 import { RedisService } from '../common/redis/redis.service';
+import { AuditService } from '../audit/audit.service';       // ✅ NEW
+import { AuditAction } from '../audit/entities/audit-log.entity'; // ✅ NEW
 
 @Injectable()
 export class AuthService {
@@ -33,6 +35,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly redis: RedisService,
+    private readonly auditService: AuditService,       
   ) {
     this.resend = new Resend(this.config.getOrThrow<string>('RESEND_API_KEY'));
   }
@@ -56,12 +59,25 @@ export class AuthService {
     const user = await this.usersService.create(dto);
     await this.generateAndSendOtp(user, OtpType.VERIFY);
 
+    await this.auditService.log(
+      AuditAction.REGISTER,
+      user.id,
+      user.email,
+      { name: user.name },
+    ).catch(() => {});
+
     const { password, refreshToken, ...safe } = user;
     return { ...safe, requiresOtp: true };
   }
 
   async login(user: User, res: Response): Promise<void> {
     await this.issueTokenCookies(user, res);
+
+    await this.auditService.log(
+      AuditAction.LOGIN,
+      user.id,
+      user.email,
+    ).catch(() => {});
   }
 
   async verifyRegistrationOtp(email: string, code: string): Promise<void> {
@@ -130,6 +146,37 @@ export class AuthService {
     await this.usersService.updatePassword(userId, hashed);
     await this.redis.del(`reset:token:${resetToken}`);
     await this.usersService.updateRefreshToken(userId, null);
+
+    const user = await this.usersService.findById(userId);
+    await this.auditService.log(
+      AuditAction.PASSWORD_RESET,
+      userId,
+      user.email,
+    ).catch(() => {});
+  }
+
+  async logout(userId: string, res: Response): Promise<void> {
+    await this.usersService.updateRefreshToken(userId, null);
+    const refreshPath = `/${this.config.getOrThrow<string>('API_PREFIX')}/auth/refresh`;
+
+    const user = await this.usersService.findById(userId);
+    await this.auditService.log(
+      AuditAction.LOGOUT,
+      userId,
+      user.email,
+    ).catch(() => {});
+
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      secure:   true,
+      sameSite: 'none',
+    });
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure:   true,
+      sameSite: 'none',
+      path:     refreshPath,
+    });
   }
 
   private async issueTokenCookies(user: User, res: Response): Promise<void> {
@@ -149,7 +196,6 @@ export class AuthService {
 
     const refreshPath = `/${this.config.getOrThrow<string>('API_PREFIX')}/auth/refresh`;
 
-    // ✅ FIXED: sameSite none + secure true for cross-origin cookie support
     res.cookie('access_token', accessToken, {
       httpOnly: true,
       secure:   true,
@@ -168,24 +214,6 @@ export class AuthService {
 
   async refresh(user: User, res: Response): Promise<void> {
     await this.issueTokenCookies(user, res);
-  }
-
-  // ✅ FIXED: sameSite none + secure true for cross-origin cookie support
-  async logout(userId: string, res: Response): Promise<void> {
-    await this.usersService.updateRefreshToken(userId, null);
-    const refreshPath = `/${this.config.getOrThrow<string>('API_PREFIX')}/auth/refresh`;
-
-    res.clearCookie('access_token', {
-      httpOnly: true,
-      secure:   true,
-      sameSite: 'none',
-    });
-    res.clearCookie('refresh_token', {
-      httpOnly: true,
-      secure:   true,
-      sameSite: 'none',
-      path:     refreshPath,
-    });
   }
 
   private async getUserForOtp(email: string, type: OtpType): Promise<User> {
