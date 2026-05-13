@@ -77,7 +77,6 @@ export class FraudService {
     if (result.isFraud) {
       await this.persist(txn, ts, lat, lng, result);
 
-      // Emit WebSocket event to all connected frontend clients
       if (this.fraudGateway) {
         this.fraudGateway.emitFraudAlert({
           transactionId: txn.transactionId,
@@ -281,5 +280,52 @@ export class FraudService {
       return { lat: parts[0], lng: parts[1] };
     }
     return { lat: null, lng: null };
+  }
+
+  async getTrends(days: number): Promise<any[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+
+    const rows = await this.flaggedRepo
+      .createQueryBuilder('f')
+      .select(`DATE(f."flaggedAt")`, 'date')
+      .addSelect('f.reason', 'reason')
+      .addSelect('COUNT(*)', 'count')
+      .where('f."flaggedAt" >= :since', { since })
+      .groupBy(`DATE(f."flaggedAt"), f.reason`)
+      .orderBy(`DATE(f."flaggedAt")`, 'ASC')
+      .getRawMany();
+
+    const result = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - (days - 1 - i));
+      const date = d.toISOString().split('T')[0];
+
+      const dayRows = rows.filter(
+        (r) => new Date(r.date).toISOString().split('T')[0] === date,
+      );
+
+      result.push({
+        date,
+        label: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+        HIGH_VELOCITY: parseInt(
+          dayRows.find((r) => r.reason === 'HIGH_VELOCITY')?.count ?? '0',
+          10,
+        ),
+        DAILY_LIMIT_EXCEEDED: parseInt(
+          dayRows.find((r) => r.reason === 'DAILY_LIMIT_EXCEEDED')?.count ?? '0',
+          10,
+        ),
+        GEO_VELOCITY: parseInt(
+          dayRows.find((r) => r.reason === 'GEO_VELOCITY')?.count ?? '0',
+          10,
+        ),
+        total: dayRows.reduce((sum, r) => sum + parseInt(r.count, 10), 0),
+      });
+    }
+
+    return result;
   }
 }

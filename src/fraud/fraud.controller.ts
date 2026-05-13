@@ -12,7 +12,6 @@ import { AnalyseFraudDto } from './dto/analyse-fraud.dto';
 export class FraudController {
   constructor(private readonly fraudService: FraudService) {}
 
-  /** GET /api/v1/fraud/check?userId=user_001 */
   @Get('check')
   @ApiOperation({ summary: 'Get all flagged transactions for a user' })
   @ApiQuery({ name: 'userId', required: true })
@@ -26,7 +25,6 @@ export class FraudController {
     return this.fraudService.getFlaggedByUser(userId, page, Math.min(limit, 200));
   }
 
-  /** POST /api/v1/fraud/analyse */
   @Post('analyse')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Real-time fraud check on a single transaction' })
@@ -35,7 +33,6 @@ export class FraudController {
     return this.fraudService.analyse(dto);
   }
 
-  /** GET /api/v1/fraud/all */
   @Get('all')
   @ApiOperation({ summary: 'List all flagged transactions (all users)' })
   @ApiQuery({ name: 'page',   required: false, type: Number })
@@ -49,17 +46,26 @@ export class FraudController {
     return this.fraudService.getAllFlagged(page, Math.min(limit, 500), reason);
   }
 
-  /** GET /api/v1/fraud/heatmap */
   @Get('heatmap')
   @ApiOperation({ summary: 'Geo-coordinates of flagged transactions for map' })
   async heatmap() {
     return this.fraudService.getHeatmapData();
   }
 
-  /** GET /api/v1/fraud/stats */
   @Get('stats')
   @ApiOperation({ summary: 'System-wide fraud statistics' })
   async stats() {
     return this.fraudService.getStats();
+  }
+
+  @Get('trends')
+  @ApiOperation({ summary: 'Fraud trends grouped by date and reason' })
+  @ApiQuery({ name: 'days', required: false, type: Number, example: 7 })
+  async trends(
+
+    @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
+  ) {
+
+    return this.fraudService.getTrends(Math.min(days, 30));
   }
 }
