@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBody, ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -19,7 +20,7 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
   VerifyResetOtpDto,
-} from '../otp/dto/otp.dto';                   
+} from '../otp/dto/otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
@@ -32,6 +33,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @Throttle({ short: { ttl: 60000, limit: 3 } }) // 3 registrations per minute
   @ApiOperation({ summary: 'Register a new user and send verification OTP' })
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -41,6 +43,7 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 login attempts per minute
   @ApiOperation({ summary: 'Login and receive JWT cookies' })
   @ApiBody({ type: LoginDto })
   async login(
@@ -51,10 +54,10 @@ export class AuthController {
     return {
       message: 'Login successful',
       user: {
-        id: user.id,
+        id:    user.id,
         email: user.email,
-        name: user.name,
-        role: user.role,
+        name:  user.name,
+        role:  user.role,
       },
     };
   }
@@ -63,6 +66,7 @@ export class AuthController {
   @UseGuards(JwtRefreshGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 10 } }) // 10 refresh attempts per minute
   @ApiOperation({ summary: 'Refresh access token using refresh cookie' })
   async refresh(
     @CurrentUser() user: User,
@@ -97,6 +101,7 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 3 } }) // 3 reset attempts per minute
   @ApiOperation({ summary: 'Send password reset OTP to email' })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     await this.authService.forgotPassword(dto.email);
@@ -106,6 +111,7 @@ export class AuthController {
   @Public()
   @Post('verify-reset-otp')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 attempts per minute
   @ApiOperation({ summary: 'Verify reset OTP and receive reset token' })
   async verifyResetOtp(@Body() dto: VerifyResetOtpDto) {
     return this.authService.verifyResetOtp(dto.email, dto.code);
@@ -114,6 +120,7 @@ export class AuthController {
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { ttl: 60000, limit: 3 } }) // 3 resets per minute
   @ApiOperation({ summary: 'Reset password using reset token' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto.resetToken, dto.newPassword);

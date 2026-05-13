@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { FraudModule } from './fraud/fraud.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { IngestionModule } from './ingestion/ingestion.module';
@@ -11,12 +13,12 @@ import { QueueModule } from './queue/queue.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { OtpModule } from './otp/otp.module';
-import { AuditModule } from './audit/audit.module';        
+import { AuditModule } from './audit/audit.module';
 import { AppController } from './app.controller';
 import { Transaction } from './transactions/entities/transaction.entity';
 import { FlaggedTransaction } from './fraud/entities/flagged-transaction.entity';
 import { User } from './users/entities/user.entity';
-import { AuditLog } from './audit/entities/audit-log.entity'; 
+import { AuditLog } from './audit/entities/audit-log.entity';
 
 const toBoolean = (value: string): boolean => value === 'true';
 
@@ -40,26 +42,38 @@ const getKafkaModule = () => {
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
 
+    ThrottlerModule.forRoot([
+      {
+        name:  'short',
+        ttl:   60000, 
+        limit: 10,      
+      },
+      {
+        name:  'long',
+        ttl:   3600000,
+        limit: 100,     
+      },
+    ]),
+
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => {
         const databaseUrl = cfg.get<string>('DATABASE_URL');
-
         return {
           type: cfg.getOrThrow<'postgres'>('DB_TYPE') as 'postgres',
           ...(databaseUrl
             ? { url: databaseUrl }
             : {
-                host: cfg.getOrThrow<string>('DB_HOST'),
-                port: toNumber(cfg.getOrThrow<string>('DB_PORT')),
+                host:     cfg.getOrThrow<string>('DB_HOST'),
+                port:     toNumber(cfg.getOrThrow<string>('DB_PORT')),
                 username: cfg.getOrThrow<string>('DB_USER'),
                 password: cfg.getOrThrow<string>('DB_PASS'),
                 database: cfg.getOrThrow<string>('DB_NAME'),
               }),
           entities: [Transaction, FlaggedTransaction, User, AuditLog],
           synchronize: toBoolean(cfg.getOrThrow<string>('DB_SYNCHRONIZE')),
-          logging: toBoolean(cfg.getOrThrow<string>('DB_LOGGING')),
+          logging:     toBoolean(cfg.getOrThrow<string>('DB_LOGGING')),
           ssl: toBoolean(cfg.get<string>('DB_SSL_ENABLED', 'false'))
             ? {
                 rejectUnauthorized: toBoolean(
@@ -81,9 +95,15 @@ const getKafkaModule = () => {
     TransactionsModule,
     FraudModule,
     IngestionModule,
-    AuditModule,      
+    AuditModule,
     ...getKafkaModule(),
   ],
   controllers: [AppController],
+  providers: [
+    {
+      provide:  APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
